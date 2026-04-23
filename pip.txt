@@ -1,0 +1,75 @@
+# Nearest neighbor & clustering acceleration
+hnswlib==0.8.0
+annoy==1.17.3
+pynndescent==0.5.13
+
+# Batch correction & multi-omics integration
+harmonypy==0.0.10
+scanorama==1.7.4
+scvi-tools==1.4.1
+
+# Deep learning & probabilistic modeling
+#torch==2.7.1
+torchmetrics==1.8.2
+lightning==2.6.0
+gpytorch==1.14
+
+# PyTorch Geometric for graph learning
+#torch-geometric==2.6.1
+#torch-cluster==1.6.3+pt27cu126
+#torch-scatter==2.1.2+pt27cu126
+#torch-sparse==0.6.18+pt27cu126
+#torch-spline-conv==1.2.2+pt27cu126
+
+# Advanced interactive visualization
+plotly==6.1.2
+
+anndata==0.11.4
+
+# Basic scientific computing & visualization
+numpy==2.2.6
+pandas==2.3.0
+scipy==1.15.3
+matplotlib==3.10.3
+seaborn==0.13.2
+scikit-learn==1.7.0
+statsmodels==0.14.4
+networkx==3.5
+tqdm==4.67.1
+
+# High-performance computation
+numba==0.61.2
+llvmlite==0.44.0
+
+# Single-cell & spatial transcriptomics core
+scanpy==1.11.2
+leidenalg==0.10.2
+louvain==0.8.2
+umap-learn==0.5.7
+mudata==0.3.2
+
+# Bioinformatics & multi-omics
+#rpy2==3.5.11
+#bedtools==2.31.1
+#r-mclust==6.1.1
+#pysam==0.23.3
+#pybedtools==0.12.0
+gseapy==1.1.10
+
+# Graph & spatial analysis
+igraph==0.11.8
+python-igraph==0.11.8
+geopandas==1.1.0
+shapely==2.1.1
+
+# File I/O & common utilities
+h5py==3.13.0
+tifffile==2025.6.1
+fsspec==2025.5.1
+protobuf==6.33.5
+pyyaml==6.0.2
+requests==2.32.3
+
+ipykernel
+colorcet==3.1.0
+pot
