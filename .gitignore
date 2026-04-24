@@ -5,6 +5,8 @@ __pycache__/
 
 *.h5ad
 
+./.virtual_documents
+
 # C extensions
 *.so
 
@@ -212,3 +214,7 @@ __marimo__/
 *.zip
 /Tutorials/Data/1_DLPFC/output_STACAME
 /Tutorials/output_STACAME_OT
+/.virtual_documents
+/.virtual_documents
+/.virtual_documents
+/Tutorials/Data/1_DLPFC/output_STACAME_minibatch

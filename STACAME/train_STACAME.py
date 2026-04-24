@@ -2067,7 +2067,7 @@ def train_STACAME_subgraph(adata_species_dict,
                 #torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
                 optimizer.step()
                 total_loss += loss.item()
-            print(f'Epoch = {epoch}, mse loss = {total_loss/len(train_loader)}')
+            #print(f'Epoch = {epoch}, mse loss = {total_loss/len(train_loader)}')
 
         with torch.no_grad():
             z_list = []
@@ -2597,8 +2597,8 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
                 z, out = model(data.x.to(pretrain_device), data.edge_index.to(pretrain_device))
 
                 if epoch % 10 == 0 and epoch >= stagate_epoch_dict[species_id]//2:
-                    if verbose:
-                        print('Update spot triplets at epoch ' + str(epoch))
+                    # if verbose:
+                    #     print('Update spot triplets at epoch ' + str(epoch))
                     adata.obsm['STAGATE'] = z.cpu().detach().numpy()
                     # If knn_neigh>1, points in one slice may have multiple MNN points in another slice.
                     # not all points have MNN achors
@@ -2914,7 +2914,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
             loss_dict['Loss name'].append('MMD')
             loss_dict['Epoch'].append(epoch)
             loss_dict['Loss value'].append(mmd_loss_sum.item())
-        if verbose == True:
+        if verbose == True and epoch % 100 == 0:
             print(f'---------------------------------Epoch {epoch}-----------------------------------')
             print(f'MSE loss:{mse_loss.item()},  Cross species triplets:{tri_output_species.item()}, MMD loss:{mmd_loss_sum.item()}, GAN loss: {loss_G_GAN.item()}')
             if if_integrate_within_species == True:
