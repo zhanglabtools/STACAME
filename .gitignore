@@ -218,3 +218,5 @@ __marimo__/
 /.virtual_documents
 /.virtual_documents
 /Tutorials/Data/1_DLPFC/output_STACAME_minibatch
+Tutorials/Tutorial1_DLPFC_Testminibatch.ipynb
+Tutorials/Tutorial1_DLPFCminibatch.ipynb
