@@ -2983,10 +2983,6 @@ def train_STACAME_minibatch(adata_species_dict,
     return (adata_species_dict, loss_dict) if if_return_loss else adata_species_dict
 
 
-
-
-
-
 def train_STACAME_subgraph_auxiliary(adata_species_dict,
                                      triplet_ind_species_dict,
                                      edge_ndarray_species,
@@ -2994,6 +2990,7 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
                                      edge_ndarray_sections=None,
                                      hidden_dims=[512, 30],
                                      stagate_epoch=500,
+                                     n_epochs=1000,
                                      n_epochs_species=2000,
                                      lr=0.001,
                                      key_added='STACAME',
@@ -3004,6 +3001,7 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
                                      margin=1.0,
                                      margin_species=1.0,
                                      lr_species=0.001,
+                                     alpha=1,
                                      beta=1,
                                      verbose=False,
                                      random_seed=666,
@@ -3420,7 +3418,8 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
     auxiliary_subgraph_loader = NeighborLoader(auxiliary_data, num_neighbors=[-1], batch_size=batch_size * 2,
                                                shuffle=False)
 
-    ite_N = max(int((len(anchor_ind_species) // batch_size)), 1)
+    ite_N = max(int((len(anchor_ind_species) // batch_size)) + 1, 1)
+    # ite_N = max(int((auxiliary_X.shape[0] // batch_size)) + 1, 1)
     print('ite_N', ite_N)
     species_ids = list(adata_species_dict.keys())
 
@@ -3429,8 +3428,8 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
         k_add = 0
         for species_id in z_dict.keys():
             # species_add_dict[species_id] = int(k_add)
-            adata_species_dict[species_id].obsm['STAGATE'] = z[
-                k_add:int(k_add + adata_species_dict[species_id].n_obs), :].cpu().detach().numpy()
+            adata_species_dict[species_id].obsm['STAGATE'] = z[k_add:int(k_add + adata_species_dict[species_id].n_obs),
+                                                             :].cpu().detach().numpy()
             z_dict[species_id] = adata_species_dict[species_id].obsm['STAGATE']
             k_add = int(k_add + adata_species_dict[species_id].n_obs)
 
@@ -3674,8 +3673,8 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
         # torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
         for species_id in z_dict.keys():
             k_add = species_add_dict[species_id]
-            adata_species_dict[species_id].obsm[key_added] = z[
-                k_add:int(k_add + adata_species_dict[species_id].n_obs), :].cpu().detach().numpy()
+            adata_species_dict[species_id].obsm[key_added] = z[k_add:int(k_add + adata_species_dict[species_id].n_obs),
+                                                             :].cpu().detach().numpy()
 
         if epoch % plot_epoch == 0 and n_epochs_species - epoch >= plot_epoch:
             if z.shape[0] >= 50000:
@@ -3692,7 +3691,6 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
 
     # print('Clustering and UMAP of Cross Species STACAME:')
     # clustering_umap_downsampling(adata_species_dict, key_umap=key_added, downsampling_rate = umap_downsampling_rate)
-
     del model, optimizer, D_Z, data
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
