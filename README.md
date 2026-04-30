@@ -80,6 +80,7 @@ Three step-by-step tutorials are included in the `Tutorial` folder and https://S
 Datasets are available on https://drive.google.com/drive/folders/1hH3FBU0gU0iRdY4197ED3JDJHC1tsvqp?usp=drive_link 
 
 - [Tutorial 1: Integrating human and macaque DLPFC slices (10x Visium, Stereo-seq)](./Tutorials/Tutorial1_DLPFC.ipynb)
+  | [Minibatch version](Tutorials/Tutorial1_DLPFC_minibatch.ipynb)
 - [Tutorial 2: Integrating mouse, marmoset and macaque hippocampus (Stereo-seq)](./Tutorials/Tutorial2_Hippocampus_3species.ipynb)
 - [Tutorial 3: Integrating mouse and macaque hippocampus slices across sequencing platforms (Slide-seqV2, Stereo-seq)](./Tutorials/Tutorial3_Hippocampus_crossplatform.ipynb)
 - [Tutorial 4: Integrating mouse and human cortex slices (MERFISH)](./Tutorials/Tutorial4_Cortex_MERFISH.ipynb)
