@@ -126,7 +126,7 @@ def get_species_triples(species_parameters):
 
 
 
-def create_dictionary_mnn(adata, use_rep, batch_name, k = 50, save_on_disk = True, approx = True, verbose = 1, iter_comb = None):
+def create_dictionary_mnn(adata, use_rep, batch_name, k = 50, save_on_disk = True, approx = False, verbose = 1, iter_comb = None):
 
     cell_names = adata.obs_names
 
@@ -197,14 +197,14 @@ def consecutive_indexed(Y):
     return True
 
 
-def nn_approx(ds1, ds2, names1, names2, knn=50):
+def nn_approx(ds1, ds2, names1, names2, knn=50, random_seed=42):
     dim = ds2.shape[1]
     num_elements = ds2.shape[0]
     p = hnswlib.Index(space='l2', dim=dim)
-    p.init_index(max_elements=num_elements, ef_construction=100, M = 16)
+    p.init_index(max_elements=num_elements, ef_construction=100, M=16, random_seed=random_seed)
     p.set_ef(10)
     p.add_items(ds2)
-    ind,  distances = p.knn_query(ds1, k=knn)
+    ind, distances = p.knn_query(ds1, k=knn)
     match = set()
     for a, b in zip(range(ds1.shape[0]), ind):
         for b_i in b:
@@ -212,9 +212,22 @@ def nn_approx(ds1, ds2, names1, names2, knn=50):
     return match
 
 
+# def nn(ds1, ds2, names1, names2, knn=50, metric_p=2):
+#     # Find nearest neighbors of first dataset.
+#     nn_ = NearestNeighbors(knn, p=metric_p)
+#     nn_.fit(ds2)
+#     ind = nn_.kneighbors(ds1, return_distance=False)
+
+#     match = set()
+#     for a, b in zip(range(ds1.shape[0]), ind):
+#         for b_i in b:
+#             match.add((names1[a], names2[b_i]))
+
+#     return match
+
 def nn(ds1, ds2, names1, names2, knn=50, metric_p=2):
     # Find nearest neighbors of first dataset.
-    nn_ = NearestNeighbors(knn, p=metric_p)
+    nn_ = NearestNeighbors(n_neighbors=knn, p=metric_p)
     nn_.fit(ds2)
     ind = nn_.kneighbors(ds1, return_distance=False)
 

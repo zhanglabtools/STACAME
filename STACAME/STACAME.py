@@ -87,6 +87,113 @@ def seed_everything(seed=42):
 
 seed_everything(42)
 
+
+
+
+# class STACAME(nn.Module):
+#     def __init__(self, hidden_dims):
+#         super(STACAME, self).__init__()
+
+#         [in_dim, num_hidden, out_dim] = hidden_dims
+
+#         self.conv1 = GATConv(in_dim, num_hidden, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+#         self.conv2 = GATConv(num_hidden, out_dim, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+#         self.conv3 = GATConv(out_dim, num_hidden, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+#         self.conv4 = GATConv(num_hidden, in_dim, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+
+#         # ========= 新增 LayerNorm =========
+#         self.ln1 = nn.LayerNorm(num_hidden)
+#         self.ln2 = nn.LayerNorm(out_dim)
+#         self.ln3 = nn.LayerNorm(num_hidden)
+#         self.ln4 = nn.LayerNorm(in_dim)
+
+#     def forward(self, features, edge_index):
+#         # Encoder
+#         h1 = self.conv1(features, edge_index)
+#         h1 = self.ln1(h1)
+#         h1 = F.elu(h1)
+
+#         h2 = self.conv2(h1, edge_index, attention=False)
+#         h2 = self.ln2(h2)
+
+#         # Weight tying
+#         self.conv3.lin_src.data = self.conv2.lin_src.transpose(0, 1)
+#         self.conv3.lin_dst.data = self.conv2.lin_dst.transpose(0, 1)
+#         self.conv4.lin_src.data = self.conv1.lin_src.transpose(0, 1)
+#         self.conv4.lin_dst.data = self.conv1.lin_dst.transpose(0, 1)
+
+#         # Decoder
+#         h3 = self.conv3(h2, edge_index, attention=True,
+#                         tied_attention=self.conv1.attentions)
+#         h3 = self.ln3(h3)
+#         h3 = F.elu(h3)
+
+#         h4 = self.conv4(h3, edge_index, attention=False)
+#         h4 = self.ln4(h4)
+
+#         return h2, h4
+
+# class STACAME_Decoder(torch.nn.Module):
+#     def __init__(self, hidden_dims, use_mlp=False):
+#         super(STACAME_Decoder, self).__init__()
+#         [in_dim, num_hidden, out_dim] = hidden_dims
+        
+#         # GAT layers
+#         self.conv1 = GATConv(out_dim, num_hidden, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+#         self.conv2 = GATConv(num_hidden, out_dim, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+#         self.conv3 = GATConv(out_dim, num_hidden, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+#         self.conv4 = GATConv(num_hidden, in_dim, heads=1, concat=False,
+#                              dropout=0, add_self_loops=False, bias=False)
+        
+#         # LayerNorm layers (matching STACAME's normalization)
+#         self.ln1 = nn.LayerNorm(num_hidden)
+#         self.ln2 = nn.LayerNorm(out_dim)
+#         self.ln3 = nn.LayerNorm(num_hidden)
+#         self.ln4 = nn.LayerNorm(in_dim)
+        
+#         # Optional MLP with residual connection
+#         if use_mlp:
+#             self.mlp = torch.nn.Sequential(
+#                 torch.nn.Linear(in_dim, num_hidden),
+#                 torch.nn.ELU(),
+#                 torch.nn.Linear(num_hidden, in_dim)
+#             )
+#         self.use_mlp = use_mlp
+        
+#     def forward(self, h2, edge_index):
+#         # Decoder forward with LayerNorm
+#         h1 = self.conv1(h2, edge_index)
+#         h1 = self.ln1(h1)
+#         h1 = F.elu(h1)
+        
+#         h2_out = self.conv2(h1, edge_index, attention=False)
+#         h2_out = self.ln2(h2_out)  # no activation, symmetric to encoder
+        
+#         # Weight tying (conv3 tied to conv2)
+#         self.conv3.lin_src.data = self.conv2.lin_src.transpose(0, 1)
+#         self.conv3.lin_dst.data = self.conv2.lin_dst.transpose(0, 1)
+        
+#         h3 = self.conv3(h2_out, edge_index, attention=True,
+#                         tied_attention=self.conv1.attentions)
+#         h3 = self.ln3(h3)
+#         h3 = F.elu(h3)
+        
+#         h4 = self.conv4(h3, edge_index, attention=False)
+#         h4 = self.ln4(h4)  # no activation on output
+        
+#         # Optional MLP post-processing with residual connection
+#         if self.use_mlp:
+#             h4 = h4 + self.mlp(h4)
+            
+#         return h2_out, h4
+        
 class STACAME(torch.nn.Module):
     def __init__(self, hidden_dims):
         super(STACAME, self).__init__()
@@ -114,30 +221,6 @@ class STACAME(torch.nn.Module):
         h4 = self.conv4(h3, edge_index, attention=False)
 
         return h2, h4  # F.log_softmax(x, dim=-1)
-        
-
-class STACAME_light(torch.nn.Module):
-    def __init__(self, hidden_dims):
-        super(STACAME_light, self).__init__()
-
-        [in_dim, num_hidden, out_dim] = hidden_dims
-        self.conv1 = GATConv(in_dim, out_dim, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv4 = GATConv(out_dim, in_dim, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-
-    def forward(self, features, edge_index):
-
-        h1 = F.elu(self.conv1(features, edge_index))
-        #h2 = self.conv2(h1, edge_index, attention=False)
-        # self.conv3.lin_src.data = self.conv2.lin_src.transpose(0, 1)
-        # self.conv3.lin_dst.data = self.conv2.lin_dst.transpose(0, 1)
-        self.conv4.lin_src.data = self.conv1.lin_src.transpose(0, 1)
-        self.conv4.lin_dst.data = self.conv1.lin_dst.transpose(0, 1)
-        
-        h4 = self.conv4(h1, edge_index, attention=False)
-
-        return h1, h4  # F.log_softmax(x, dim=-1)
 
 class STACAME_Decoder(torch.nn.Module):
     def __init__(self, hidden_dims, use_mlp=False):
@@ -154,7 +237,6 @@ class STACAME_Decoder(torch.nn.Module):
         self.conv4 = GATConv(num_hidden, in_dim, heads=1, concat=False,
                              dropout=0, add_self_loops=False, bias=False)
         
-        # 可选的全连接层
         if use_mlp:
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(in_dim, num_hidden),
@@ -174,7 +256,6 @@ class STACAME_Decoder(torch.nn.Module):
                               tied_attention=self.conv1.attentions))
         h4 = self.conv4(h3, edge_index, attention=False)
         
-        # 可选的MLP后处理
         if self.use_mlp:
             h4 = h4 + self.mlp(h4)  # 残差连接
             
@@ -385,125 +466,6 @@ class WDiscriminator(torch.nn.Module):
 
 
 
-class STACAME_Multi(torch.nn.Module):
-    def __init__(self, hidden_dims):
-        super(STACAME_Multi, self).__init__()
-        #self.FCN_list = []
-        #for spe_id, spe_input_dim in self.species_dim_dict.items():
-        
-        [in_dim, num_hidden, out_dim] = hidden_dims
-        self.in_dim = in_dim
-        self.conv1 = GATConv(in_dim, num_hidden, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv2 = GATConv(num_hidden, out_dim, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv3 = GATConv(out_dim, num_hidden, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv4 = GATConv(num_hidden, in_dim, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-
-    def forward(self, features_dict, edge_index, device):
-        #features_0 = features[0:]    
-        s = 0
-        for species_id in features_dict.keys():
-            if s == 0:
-                features = F.leaky_relu(nn.Linear(features_dict[species_id].shape[1], self.in_dim).to(device)(features_dict[species_id].to(device)))
-            else:
-                features_temp = F.leaky_relu(nn.Linear(features_dict[species_id].shape[1], self.in_dim).to(device)(features_dict[species_id].to(device)))
-                features = torch.concat((features, features_temp), axis=0).to(device)
-            s += 1
-        #features = features.to(device)
-
-        h1 = F.elu(self.conv1(features, edge_index))
-        h2 = self.conv2(h1, edge_index, attention=False)
-        self.conv3.lin_src.data = self.conv2.lin_src.transpose(0, 1)
-        self.conv3.lin_dst.data = self.conv2.lin_dst.transpose(0, 1)
-        self.conv4.lin_src.data = self.conv1.lin_src.transpose(0, 1)
-        self.conv4.lin_dst.data = self.conv1.lin_dst.transpose(0, 1)
-        h3 = F.elu(self.conv3(h2, edge_index, attention=True,
-                              tied_attention=self.conv1.attentions))
-        h4 = self.conv4(h3, edge_index, attention=False)
-
-        return h2, h4, features  # F.log_softmax(x, dim=-1)
-
-
-class STAligner(torch.nn.Module):
-    def __init__(self, hidden_dims):
-        super(STACAME, self).__init__()
-
-        [in_dim, num_hidden, out_dim] = hidden_dims
-        self.conv1 = GATConv(in_dim, num_hidden, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv2 = GATConv(num_hidden, out_dim, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv3 = GATConv(out_dim, num_hidden, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-        self.conv4 = GATConv(num_hidden, in_dim, heads=1, concat=False,
-                             dropout=0, add_self_loops=False, bias=False)
-
-    def forward(self, features, edge_index):
-
-        h1 = F.elu(self.conv1(features, edge_index))
-        h2 = self.conv2(h1, edge_index, attention=False)
-        self.conv3.lin_src.data = self.conv2.lin_src.transpose(0, 1)
-        self.conv3.lin_dst.data = self.conv2.lin_dst.transpose(0, 1)
-        self.conv4.lin_src.data = self.conv1.lin_src.transpose(0, 1)
-        self.conv4.lin_dst.data = self.conv1.lin_dst.transpose(0, 1)
-        h3 = F.elu(self.conv3(h2, edge_index, attention=True,
-                              tied_attention=self.conv1.attentions))
-        h4 = self.conv4(h3, edge_index, attention=False)
-
-        return h2, h4  # F.log_softmax(x, dim=-1)
-
-
-class discriminator(nn.Module):
-    def __init__(self, n_input):
-        super(discriminator, self).__init__()
-        self.n_input = n_input
-        n_hidden = 512
-
-        self.W_1 = nn.Parameter(torch.Tensor(n_hidden, self.n_input).normal_(mean=0.0, std=0.1))
-        self.b_1 = nn.Parameter(torch.Tensor(n_hidden).normal_(mean=0.0, std=0.1))
-
-        self.W_2 = nn.Parameter(torch.Tensor(n_hidden, n_hidden).normal_(mean=0.0, std=0.1))
-        self.b_2 = nn.Parameter(torch.Tensor(n_hidden).normal_(mean=0.0, std=0.1))
-
-        self.W_3 = nn.Parameter(torch.Tensor(1, n_hidden).normal_(mean=0.0, std=0.1))
-        self.b_3 = nn.Parameter(torch.Tensor(1).normal_(mean=0.0, std=0.1))
-
-    def forward(self, x):
-        h = F.relu(F.linear(x, self.W_1, self.b_1))
-        h = F.relu(F.linear(h, self.W_2, self.b_2))
-        score = F.linear(h, self.W_3, self.b_3)
-        return torch.clamp(score, min=-50.0, max=50.0)
-
-class generator(nn.Module):
-    def __init__(self, n_input, n_latent):
-        super(generator, self).__init__()
-        self.n_input = n_input
-        self.n_latent = n_latent
-        n_hidden = 512
-        self.attention = nn.Sequential(
-            nn.Linear(n_latent, n_latent),
-            nn.ReLU(),
-            nn.Sigmoid()  # 输出 [0, 1] 权重
-        )
-
-        self.W_1 = nn.Parameter(torch.Tensor(n_hidden, self.n_latent).normal_(mean=0.0, std=0.1))
-        self.b_1 = nn.Parameter(torch.Tensor(n_hidden).normal_(mean=0.0, std=0.1))
-
-        self.W_2 = nn.Parameter(torch.Tensor(self.n_input, n_hidden).normal_(mean=0.0, std=0.1))
-        self.b_2 = nn.Parameter(torch.Tensor(self.n_input).normal_(mean=0.0, std=0.1))
-
-        self.feature_mask = nn.Parameter(torch.ones(n_latent))  # 可训练参数
-
-    def forward(self, z):
-        # attn_weights = self.attention(z)
-        # z = z * attn_weights
-        z = z * self.feature_mask
-        h = F.relu(F.linear(z, self.W_1, self.b_1))
-        x = F.linear(h, self.W_2, self.b_2)
-        return x
 
 class MultiClassDiscriminator(nn.Module):
     def __init__(self, n_input, num_classes):
