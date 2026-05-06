@@ -1,3 +1,4 @@
+
 import os
 import anndata as ad
 import scanpy as sc
@@ -156,10 +157,7 @@ class STACAME_processer():
                 raise Exception("The element value of rad_cutoff_dict should be a dict of length of 1 or number of sections.")
         print('self.rad_cutoff_dict:', self.rad_cutoff_dict)
     
-    def load_process_adata(self, random_seed=42):
-        random.seed(random_seed)
-        np.random.seed(random_seed)
-        os.environ["PYTHONHASHSEED"] = str(random_seed)
+    def load_process_adata(self):
         start = timeit.default_timer()
         ## Load gene orthologs and remove rows with na
         Gene_map_raw_path = self.Gene_map_raw_path
@@ -223,7 +221,7 @@ class STACAME_processer():
         for species_id, column_name in self.species_ortholog_column_dict.items():
             orthologs_gene_list = set(Gene_map_common_df[column_name])
             hvg_list = set(list(species_common_hvg_dict[species_id]))
-            species_orthologs_hvg_union_dict[species_id] = list(hvg_list.union(orthologs_gene_list))    
+            species_orthologs_hvg_union_dict[species_id] = list(hvg_list.union(orthologs_gene_list))
 
         ## Normalizing data
         print('Normalizing data and get spatial neigbors...')
@@ -288,13 +286,15 @@ class STACAME_processer():
         for species_id, adata_concat in adata_dict.items():
             sc.pp.highly_variable_genes(adata_concat, flavor="seurat_v3", n_top_genes=self.n_top_genes)
             if self.if_integrate_within_species:
-                sc.tl.pca(adata_concat, svd_solver='arpack', n_comps=64, random_state=random_seed)
+                #sc.pp.combat(adata_concat, key='slice_name', covariates=None, inplace=True)
+                sc.tl.pca(adata_concat, svd_solver='arpack', n_comps=64)
                 adata_concat.X = scipy.sparse.csr_matrix(adata_concat.X)
             adata_dict[species_id] = adata_concat
         
         #####################################################
         ## Concat the spatial network for multiple slices of the same species
         print('Concat the spatial network for multiple slices of the same species...')
+        #adj_concat = np.asarray(adj_list[0].todense())
         k = 0
         for species_id, adj_list in A_adj_dict.items():
             section_ids = self.species_section_ids[species_id]
@@ -394,11 +394,13 @@ class STACAME_processer():
                             zero_mat_prod[:, v_num_sum:int(v_num_sum+v_num)] = 1
                             kv_sparse_mat_temp = kv_sparse_mat * zero_mat_prod
                             indices_max_kv = np.argsort(kv_sparse_mat_temp, axis=1)[:, -self.cross_species_neibors_K_knn:]
+                            print('indices_max_kv.shape:', indices_max_kv.shape)
                             kv_mat_ones = np.zeros(kv_sparse_mat_temp.shape)
                             for i in range(indices_max_kv.shape[0]):
                                 for j in range(indices_max_kv.shape[1]):
                                     kv_mat_ones[i][indices_max_kv[i, j]] = 1
                             edge_ndarray_s = np.nonzero(kv_mat_ones)
+                            print('edge_ndarray_s', edge_ndarray_s)
                             edge_ndarray_temp = list(edge_ndarray_s)
                             edge_ndarray_temp[0] = edge_ndarray_temp[0] + k_add
                             edge_ndarray_temp[1] = edge_ndarray_temp[1] + v_add
@@ -500,13 +502,13 @@ class STACAME_processer():
             if self.if_combat_mnn:
                 sc.pp.combat(adata_whole, key='species_id', covariates=None, inplace=True)
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim_before_mnn, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim_before_mnn)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
             else:
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim_before_mnn, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim_before_mnn)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -520,7 +522,7 @@ class STACAME_processer():
                     adata_whole.obsm['homologs'] = adata_whole.X
             else:
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim_before_mnn, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim_before_mnn)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -639,8 +641,11 @@ class STACAME_processer():
             anchor_ind_species_all, positive_ind_species_all, negative_ind_species_all = STACAME.mnn_utils.get_species_triples(species_parameters)
             print('lenghth of anchor_ind_species:', len(anchor_ind_species_all))
             ## Running STACAME
+            
             anchor_ind_all_num_dict = {k:0 for k in anchor_ind_species_all.keys()}
+            
             subsampling_rate = self.knn_triplets_ratio
+            
             anchor_ind_species = {}
             positive_ind_species = {}
             negative_ind_species = {}
@@ -652,7 +657,7 @@ class STACAME_processer():
                 negative_ind_species[s] = []
             
             for spe_id in anchor_ind_all_num_dict.keys():
-                spe_indices = random_list(anchor_ind_all_num_dict[spe_id], subsampling_rate,  seed=random_seed)
+                spe_indices = random_list(anchor_ind_all_num_dict[spe_id], subsampling_rate)
             
                 anchor_ind_species[spe_id] = [anchor_ind_species_all[spe_id][i] for i in spe_indices] 
                 positive_ind_species[spe_id] = [positive_ind_species_all[spe_id][i] for i in spe_indices] 
@@ -774,10 +779,7 @@ class STACAME_processer():
         
         df = adata_concat.var['highly_variable']
         homo_gene_ref = df[df == True].index.tolist()
-        # 【修复】对同源HVG进行排序，确保列顺序固定
-        homo_gene_ref = sorted(homo_gene_ref)
         for species_id, adata in adata_dict.items():
-            # 使用排序后的列表，并通过gene_map_dict映射到各物种对应的基因名
             adata_dict[species_id].uns['homo_highly_variable'] = [gene_map_dict[species_id][g] for g in homo_gene_ref]
         
         #############################################################
@@ -806,20 +808,21 @@ class STACAME_processer():
             else:
                 hvg_intersect_set = hvg_intersect_set.intersection(set(hvg_dict[species_id]))
                 align_gene_k += 1
-    
-        hvg_intersect_list = sorted(list(hvg_intersect_set))
-        print('Size of hvg intersect set: ', len(hvg_intersect_list))
+        
+        hvg_intersect_set = list(hvg_intersect_set)
+        print('Size of hvg intersect set: ', len(hvg_intersect_set))
+        
         hvg_aligned_dict = {k:[] for k in adata_dict.keys()}
+
         gene_name_dict = {k:{'species_specific':[], 'homo_highly_variable':[]} for k in adata_dict.keys()}
         
         for species_id, adata in adata_dict.items():
-            orthlogs = [upper2origin_dict[species_id][x] for x in hvg_intersect_list]
-            homo_hvgs = adata_dict[species_id].uns['homo_highly_variable']
-            species_specific = sorted(set(hvg_dict[species_id]) - set(orthlogs))
-            hvg_aligned_dict[species_id] = homo_hvgs + species_specific
+            orthlogs = [upper2origin_dict[species_id][x] for x in hvg_intersect_set]
+            hvg_aligned_dict[species_id] = adata_dict[species_id].uns['homo_highly_variable'] + list(set(hvg_dict[species_id]) - set(orthlogs))
             adata_dict[species_id].uns['highly_variable'] = hvg_aligned_dict[species_id]
-            gene_name_dict[species_id]['species_specific'] = species_specific
-            gene_name_dict[species_id]['homo_highly_variable'] = homo_hvgs
+
+            gene_name_dict[species_id]['species_specific'] = list(set(hvg_dict[species_id]) - set(orthlogs))
+            gene_name_dict[species_id]['homo_highly_variable'] = adata_dict[species_id].uns['homo_highly_variable']
 
         if self.gene_save_path != None:
             if not os.path.exists(self.gene_save_path):
@@ -839,6 +842,8 @@ class STACAME_processer():
             return adata_dict, triplet_ind_species_dict, edge_ndarray_species, triplet_ind_sections_dict, edge_ndarray_sections
         else:
             return adata_dict, triplet_ind_species_dict, edge_ndarray_species
+
+
 
 
 
@@ -968,9 +973,7 @@ class STACAME_processer_subgraph():
         print('self.rad_cutoff_dict:', self.rad_cutoff_dict)
     
     def load_process_adata(self):
-        random.seed(random_seed)
-        np.random.seed(random_seed)
-        os.environ["PYTHONHASHSEED"] = str(random_seed)
+        
         start = timeit.default_timer()
 
         ## Load gene orthologs and remove rows with na
@@ -1319,14 +1322,14 @@ class STACAME_processer_subgraph():
             if self.if_combat_mnn:
                 sc.pp.combat(adata_whole, key='species_id', covariates=None, inplace=True)
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
             else:
                 if self.if_pca_before_mnn:
                     print('pca...')
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -1335,7 +1338,7 @@ class STACAME_processer_subgraph():
                 print('Run combat...')
                 sc.pp.combat(adata_whole, key='species_id', covariates=None, inplace=True)
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -1343,7 +1346,7 @@ class STACAME_processer_subgraph():
                 if self.if_pca_before_mnn:
                     #adata_whole.X = np.asarray(adata_whole.X)
                     print('pca...')
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -1381,7 +1384,10 @@ class STACAME_processer_subgraph():
             anchor_ind_species = np.append(anchor_ind_species, list(map(lambda _: batch_as_dict[_], anchor_list)))
             positive_ind_species = np.append(positive_ind_species, list(map(lambda _: batch_as_dict[_], positive_list)))
             negative_ind_species = np.append(negative_ind_species, list(map(lambda _: batch_as_dict[_], negative_list)))
+
+        
         print('Finished finding cross species triplets.')
+
        
         if self.if_integrate_within_species:
             print('Beginning to find cross section triplets...')
@@ -1454,6 +1460,7 @@ class STACAME_processer_subgraph():
                 for v_species_other_order in range(k_species_order+1, len(species_id_list)):
                     v_species = species_id_list[v_species_other_order]
                     print(Species_cross_B_dict[k_species][v_species].toarray().shape)
+            #####
             species_parameters = {'Species_cross_B_dict': Species_cross_B_dict,
                           'spot_name_species_dict':spot_name_species_dict, 
                           'spotname2id':spotname2id, 
@@ -1466,6 +1473,7 @@ class STACAME_processer_subgraph():
             ## Running STACAME
             
             anchor_ind_all_num_dict = {k:0 for k in anchor_ind_species_all.keys()}
+            
             subsampling_rate = self.knn_triplets_ratio
             
             anchor_ind_species = {}
@@ -1479,7 +1487,7 @@ class STACAME_processer_subgraph():
                 negative_ind_species[s] = []
             
             for spe_id in anchor_ind_all_num_dict.keys():
-                spe_indices = random_list(anchor_ind_all_num_dict[spe_id], subsampling_rate, seed=random_seed)
+                spe_indices = random_list(anchor_ind_all_num_dict[spe_id], subsampling_rate)
             
                 anchor_ind_species[spe_id] = [anchor_ind_species_all[spe_id][i] for i in spe_indices] 
                 positive_ind_species[spe_id] = [positive_ind_species_all[spe_id][i] for i in spe_indices] 
@@ -1622,9 +1630,11 @@ class STACAME_processer_subgraph():
             hvg_order = df[df == True].index.tolist()
             hvg_dict[species_id] = [x for x in hvg_order]
             hvg_dict[species_id].sort()
+            #print(hvg_dict[species_id][1:100])
         
         hvg_intersect_set = set()
         for species_id, adata in adata_dict.items():
+            #print(len(hvg_dict[species_id]))
             if align_gene_k == 0:
                 hvg_intersect_set = set([x.upper() for x in hvg_dict[species_id]])
                 align_gene_k += 1
@@ -1724,12 +1734,14 @@ class STACAME_processer_subgraph():
         for species_id, column_name in self.species_ortholog_column_dict.items():
             common_gene_list = species_common_gene_list_dict[species_id]
             Gene_map_common_df = Gene_map_common_df[Gene_map_common_df[column_name].isin(common_gene_list)]
+            #print(Gene_map_common_df.shape)
         
         species_orthologs_hvg_union_dict = {}
         for species_id, column_name in self.species_ortholog_column_dict.items():
             orthologs_gene_list = set(Gene_map_common_df[column_name])
             hvg_list = set(list(species_common_hvg_dict[species_id]))
             species_orthologs_hvg_union_dict[species_id] = list(hvg_list.union(orthologs_gene_list))
+            #print(f'{species_id}gene number = {len(species_orthologs_hvg_union_dict[species_id])}')
     
 
         ## Normalizing data
@@ -1762,6 +1774,8 @@ class STACAME_processer_subgraph():
                     sc.pp.normalize_total(adata, target_sum=self.total_normalize_dict[species_id])
                 if self.log_normalize_dict[species_id] == True:
                     sc.pp.log1p(adata)
+                #adata.X = MaxAbsScaler().fit_transform(adata.X)
+                #sc.pp.scale(adata, max_value=1)
                 Batch_dict[species_id].append(adata)
                 A_adj_dict[species_id].append(adata.uns['adj'])
 
@@ -1804,9 +1818,12 @@ class STACAME_processer_subgraph():
         #####################################################
         ## Concat the spatial network for multiple slices of the same species
         print('Concat the spatial network for multiple slices of the same species...')
+        #adj_concat = np.asarray(adj_list[0].todense())
         k = 0
         for species_id, adj_list in A_adj_dict.items():
             section_ids = self.species_section_ids[species_id]
+            # for batch_id in range(1, len(section_ids)):
+            #     adj_list[batch_id] = csr_matrix(adj_list[batch_id])
             if k == 0:
                 adj_concat_total = adj_list[0]
                 adj_concat = adj_list[0]
@@ -2010,14 +2027,14 @@ class STACAME_processer_subgraph():
             if self.if_combat_mnn:
                 sc.pp.combat(adata_whole, key='species_id', covariates=None, inplace=True)
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
             else:
                 if self.if_pca_before_mnn:
                     print('pca...')
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -2026,7 +2043,7 @@ class STACAME_processer_subgraph():
                 print('Run combat...')
                 sc.pp.combat(adata_whole, key='species_id', covariates=None, inplace=True)
                 if self.if_pca_before_mnn:
-                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim, random_state=random_seed)
+                    sc.tl.pca(adata_whole, svd_solver='arpack', n_comps=self.pca_dim)
                     adata_whole.obsm['homologs'] = adata_whole.obsm['X_pca']
                 else:
                     adata_whole.obsm['homologs'] = adata_whole.X
@@ -2172,7 +2189,7 @@ class STACAME_processer_subgraph():
                 negative_ind_species[s] = []
             
             for spe_id in anchor_ind_all_num_dict.keys():
-                spe_indices = random_list(anchor_ind_all_num_dict[spe_id], subsampling_rate, seed=random_seed)
+                spe_indices = random_list(anchor_ind_all_num_dict[spe_id], subsampling_rate)
             
                 anchor_ind_species[spe_id] = [anchor_ind_species_all[spe_id][i] for i in spe_indices] 
                 positive_ind_species[spe_id] = [positive_ind_species_all[spe_id][i] for i in spe_indices] 
@@ -2315,9 +2332,11 @@ class STACAME_processer_subgraph():
             hvg_order = df[df == True].index.tolist()
             hvg_dict[species_id] = [x for x in hvg_order]
             hvg_dict[species_id].sort()
+            #print(hvg_dict[species_id][1:100])
         
         hvg_intersect_set = set()
         for species_id, adata in adata_dict.items():
+            #print(len(hvg_dict[species_id]))
             if align_gene_k == 0:
                 hvg_intersect_set = set([x.upper() for x in hvg_dict[species_id]])
                 align_gene_k += 1
@@ -2355,10 +2374,11 @@ class STACAME_processer_subgraph():
             return adata_dict, triplet_ind_species_dict, edge_ndarray_species
 
 
-def random_list(N, subsampling_rate, seed=None):
-    rng = random.Random(seed)  # 如果 seed 为 None 则使用系统时间
+
+
+def random_list(N, subsampling_rate):
     num = int(N * subsampling_rate)
-    result = rng.sample(range(0, N), num)
+    result = random.sample(range(0, N), num)
     result = list(set(result))
     result.sort()
     return result
