@@ -305,7 +305,7 @@ def train_STACAME(adata_species_dict,
                   n_epochs_species=2000,
                   lr=0.001,
                   key_added='STACAME',
-                  gradient_clipping=5.,
+                  gradient_clipping=10.,
                   weight_decay=0.0001,
                   lr_wd=0.001,
                   weight_decay_wd=5e-4,
@@ -323,6 +323,7 @@ def train_STACAME(adata_species_dict,
                   tri_beta=1,
                   mmd_beta=2,
                   mmd_batch_size=4000,
+                  concate_pca_dim = None,
                   if_knn_mnn_graph=True,
                   if_integrate_within_species=False,
                   if_return_loss=False):
@@ -473,7 +474,7 @@ def train_STACAME(adata_species_dict,
         if species_order == 0:
             # Instantiate the STAGATE model (encoder + decoder)
             model = STACAME.STACAME(hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(pretrain_device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
         species_order += 1
 
         print('Pretrain with STAGATE_multiple...')
@@ -549,30 +550,82 @@ def train_STACAME(adata_species_dict,
     z = torch.FloatTensor(X)
 
     # Record per-species gene ranges to split the output (optional for later use)
-    species_gene_ranges = {}
-    current_gene_idx = 0
-    S = 0
-    for species_id, adata in adata_species_dict.items():
-        if 'highly_variable' in adata.var.columns:
-            sub_adata = adata[:, adata.uns['highly_variable']]
-        else:
-            sub_adata = adata
+    # species_gene_ranges = {}
+    # current_gene_idx = 0
+    # S = 0
+    # for species_id, adata in adata_species_dict.items():
+    #     if 'highly_variable' in adata.var.columns:
+    #         sub_adata = adata[:, adata.uns['highly_variable']]
+    #     else:
+    #         sub_adata = adata
+    #     x = sub_adata.X.todense()
+    #     n_genes = x.shape[1]
+    #     species_gene_ranges[species_id] = (current_gene_idx, current_gene_idx + n_genes)
+    #     current_gene_idx += n_genes
+    #     if S != 0:
+    #         merge_X = np.concatenate((merge_X, x), axis=0)
+    #     else:
+    #         merge_X = x
+    #         S = S + 1
 
-        x = sub_adata.X.todense()
-        n_genes = x.shape[1]
-        species_gene_ranges[species_id] = (current_gene_idx, current_gene_idx + n_genes)
-        current_gene_idx += n_genes
-
-        if S != 0:
-            merge_X = np.concatenate((merge_X, x), axis=0)
+    species_list = list(adata_species_dict.keys())
+    n_species = len(species_list)
+    # 先获取同源高变基因的数量（所有物种共享，列数固定）
+    # 取第一个物种的同源高变基因数量作为基准（假设所有物种同源基因数量一致）
+    ref_species = species_list[0]
+    n_homo_genes = len(adata_species_dict[ref_species].uns['homo_highly_variable'])
+    # 获取每个物种的特异基因数量
+    species_specific_n_genes = {
+        sp: len(adata_species_dict[sp].uns['species_specific'])
+        for sp in species_list
+    }
+    max_specific_genes = max(species_specific_n_genes.values())  # 特异基因最大数量（统一对角块大小）
+    # 计算总列数：同源基因数 + 特异基因最大数量 × 物种数
+    total_cols = n_homo_genes + max_specific_genes * n_species
+    # 初始化merge矩阵和mask矩阵
+    merge_X = None
+    mask_matrix = None
+    # 2. 逐物种构建矩阵
+    for sp_idx, species_id in enumerate(species_list):
+        adata = adata_species_dict[species_id]
+        # -------------------------- 提取基因表达矩阵 --------------------------
+        # 同源高变基因部分（列对齐）
+        homo_genes = adata.uns['homo_highly_variable']
+        x_homo = adata[:, homo_genes].X.todense()  # shape: (n_cells, n_homo_genes)
+        # 物种特异基因部分
+        specific_genes = adata.uns['species_specific']
+        x_specific = adata[:, specific_genes].X.todense()  # shape: (n_cells, n_specific_genes)
+        # -------------------------- 构建当前物种的完整行矩阵 --------------------------
+        n_cells = x_homo.shape[0]
+        # 初始化当前物种的行矩阵（全0）
+        x_current = np.zeros((n_cells, total_cols))
+        mask_current = np.zeros((n_cells, total_cols))  # 当前物种的mask行
+        # 填充同源基因部分（前n_homo_genes列）
+        mask_current[:, :n_homo_genes] = 1  # 同源区域mask为1
+        # 填充特异基因部分（对角分块）
+        # 特异基因起始列：n_homo_genes + sp_idx * max_specific_genes
+        specific_start_col = n_homo_genes + sp_idx * max_specific_genes
+        specific_end_col = specific_start_col + species_specific_n_genes[species_id]
+        mask_current[:, specific_start_col:specific_end_col] = 1  # 特异区域mask为1
+        # -------------------------- 纵向拼接所有物种 --------------------------
+        if merge_X is None:
+            merge_X = x_current
+            mask_matrix = mask_current
         else:
-            merge_X = x
-            S = S + 1
+            merge_X = np.concatenate((merge_X, x_current), axis=0)
+            mask_matrix = np.concatenate((mask_matrix, mask_current), axis=0)
+
+    if concate_pca_dim != None:
+        adata_X = ad.AnnData(merge_X)
+        sc.pp.scale(adata_X)
+        sc.tl.pca(adata_X, n_comps=concate_pca_dim)
+        merge_X = adata_X.obsm["X_pca"]
     merge_X = torch.FloatTensor(merge_X).to(device)
+    #merge_X = torch.FloatTensor(merge_X).to(device)
 
     # ---------- Joint decoder and optimiser ----------
     model = STACAME.STACAME_Decoder(hidden_dims=[merge_X.shape[1], hidden_dims[0], hidden_dims[1]]).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr_species, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr_species, weight_decay=weight_decay, foreach=False)
 
     # Optionally add within-species slice edges and triplet indices
     if if_integrate_within_species:
@@ -709,7 +762,7 @@ def train_STACAME(adata_species_dict,
                                                              :].cpu().detach().numpy()
 
         # Periodic UMAP visualisation
-        if epoch % plot_epoch == 0 and n_epochs_species - epoch >= plot_epoch:
+        if verbose and epoch % plot_epoch == 0 and n_epochs_species - epoch >= plot_epoch:
             if z.shape[0] >= 50000:
                 clustering_umap_downsampling(adata_species_dict, key_umap=key_added, downsampling_rate=0.1)
             else:
@@ -750,7 +803,7 @@ def train_STACAME_GAN(adata_species_dict,
                       n_epochs_species=2000,
                       lr=0.001,
                       key_added='STACAME',
-                      gradient_clipping=5.,
+                      gradient_clipping=10.,
                       weight_decay=0.0001,
                       lr_wd=0.001,
                       weight_decay_wd=5e-4,
@@ -933,7 +986,7 @@ def train_STACAME_GAN(adata_species_dict,
         if species_order == 0:
             # Instantiate STAGATE model (shared across species)
             model = STACAME.STACAME(hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(pretrain_device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
 
         species_order += 1
         print('Pretrain with STAGATE_multiple...')
@@ -1054,25 +1107,85 @@ def train_STACAME_GAN(adata_species_dict,
     z = torch.FloatTensor(X)
 
     # ---------- Merge raw gene expression and reduce dimensionality with PCA ----------
-    S = 0
-    for species_id, adata in adata_species_dict.items():
-        if S != 0:
-            if 'highly_variable' in adata.var.columns:
-                x = adata[:, adata.uns['highly_variable']].X.todense()
-            else:
-                x = adata.X.todense()
-            merge_X = np.concatenate((merge_X, x), axis=0)
-        else:
-            if 'highly_variable' in adata.var.columns:
-                merge_X = adata[:, adata.uns['highly_variable']].X.todense()
-            else:
-                merge_X = adata.X.todense()
-            S = S + 1
+    # S = 0
+    # for species_id, adata in adata_species_dict.items():
+    #     if S != 0:
+    #         if 'highly_variable' in adata.var.columns:
+    #             x = adata[:, adata.uns['highly_variable']].X.todense()
+    #         else:
+    #             x = adata.X.todense()
+    #         merge_X = np.concatenate((merge_X, x), axis=0)
+    #     else:
+    #         if 'highly_variable' in adata.var.columns:
+    #             merge_X = adata[:, adata.uns['highly_variable']].X.todense()
+    #         else:
+    #             merge_X = adata.X.todense()
+    #         S = S + 1
 
-    adata_X = ad.AnnData(merge_X)
-    sc.pp.scale(adata_X)
-    sc.tl.pca(adata_X, n_comps=concate_pca_dim)
-    merge_X = adata_X.obsm["X_pca"]
+    species_list = list(adata_species_dict.keys())
+    n_species = len(species_list)
+    # 先获取同源高变基因的数量（所有物种共享，列数固定）
+    # 取第一个物种的同源高变基因数量作为基准（假设所有物种同源基因数量一致）
+    ref_species = species_list[0]
+    n_homo_genes = len(adata_species_dict[ref_species].uns['homo_highly_variable'])
+    # 获取每个物种的特异基因数量
+    species_specific_n_genes = {
+        sp: len(adata_species_dict[sp].uns['species_specific'])
+        for sp in species_list
+    }
+    max_specific_genes = max(species_specific_n_genes.values())  # 特异基因最大数量（统一对角块大小）
+    # 计算总列数：同源基因数 + 特异基因最大数量 × 物种数
+    total_cols = n_homo_genes + max_specific_genes * n_species
+    # 初始化merge矩阵和mask矩阵
+    merge_X = None
+    #merge_X_count = None
+    mask_matrix = None
+    # 2. 逐物种构建矩阵
+    for sp_idx, species_id in enumerate(species_list):
+        adata = adata_species_dict[species_id]
+        # -------------------------- 提取基因表达矩阵 --------------------------
+        # 同源高变基因部分（列对齐）
+        homo_genes = adata.uns['homo_highly_variable']
+        x_homo = adata[:, homo_genes].X.todense()  # shape: (n_cells, n_homo_genes)
+        #x_count_homo = adata.obsm['counts_hvg_share'].todense()  # 同源基因count矩阵
+        # 物种特异基因部分
+        specific_genes = adata.uns['species_specific']
+        x_specific = adata[:, specific_genes].X.todense()  # shape: (n_cells, n_specific_genes)
+        #x_count_specific = adata.obsm['counts_hvg_specific'].todense()
+        # -------------------------- 构建当前物种的完整行矩阵 --------------------------
+        n_cells = x_homo.shape[0]
+        # 初始化当前物种的行矩阵（全0）
+        x_current = np.zeros((n_cells, total_cols))
+        #x_count_current = np.zeros((n_cells, total_cols))
+        mask_current = np.zeros((n_cells, total_cols))  # 当前物种的mask行
+        # 填充同源基因部分（前n_homo_genes列）
+        x_current[:, :n_homo_genes] = x_homo
+        #x_count_current[:, :n_homo_genes] = x_count_homo
+        mask_current[:, :n_homo_genes] = 1  # 同源区域mask为1
+        # 填充特异基因部分（对角分块）
+        # 特异基因起始列：n_homo_genes + sp_idx * max_specific_genes
+        specific_start_col = n_homo_genes + sp_idx * max_specific_genes
+        specific_end_col = specific_start_col + species_specific_n_genes[species_id]
+
+        x_current[:, specific_start_col:specific_end_col] = x_specific
+        #x_count_current[:, specific_start_col:specific_end_col] = x_count_specific
+        mask_current[:, specific_start_col:specific_end_col] = 1  # 特异区域mask为1
+        # -------------------------- 纵向拼接所有物种 --------------------------
+        if merge_X is None:
+            merge_X = x_current
+            #merge_X_count = x_count_current
+            mask_matrix = mask_current
+        else:
+            merge_X = np.concatenate((merge_X, x_current), axis=0)
+            #merge_X_count = np.concatenate((merge_X_count, x_count_current), axis=0)
+            mask_matrix = np.concatenate((mask_matrix, mask_current), axis=0)
+
+
+    if concate_pca_dim != None:
+        adata_X = ad.AnnData(merge_X)
+        sc.pp.scale(adata_X)
+        sc.tl.pca(adata_X, n_comps=concate_pca_dim)
+        merge_X = adata_X.obsm["X_pca"]
     merge_X = torch.FloatTensor(merge_X).to(device)
 
     # ---------- Build models and discriminators ----------
@@ -1086,15 +1199,15 @@ def train_STACAME_GAN(adata_species_dict,
 
     # Joint optimizer for both primary decoder and auxiliary model
     optimizer = torch.optim.Adam(list(model.parameters()) + list(auxiliary_model.parameters()), lr=lr_species,
-                                 weight_decay=weight_decay)
+                                 weight_decay=weight_decay, foreach=False)
 
     # Domain discriminators for adversarial training
     auxiliary_D_Z = STACAME.MultiClassDiscriminator(hidden_dims[1], len(adata_species_dict.keys())).to(device)
-    auxiliary_optimizer_D = torch.optim.Adam(list(auxiliary_D_Z.parameters()), lr=0.001, weight_decay=0.001)
+    auxiliary_optimizer_D = torch.optim.Adam(list(auxiliary_D_Z.parameters()), lr=0.001, weight_decay=0.001, foreach=False)
     auxiliary_D_Z.train()
 
     D_Z = STACAME.MultiClassDiscriminator(hidden_dims[1], len(adata_species_dict.keys())).to(device)
-    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001)
+    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001, foreach=False)
     D_Z.train()
 
     # Create ground-truth domain labels for GAN
@@ -1311,7 +1424,7 @@ def train_STACAME_GAN(adata_species_dict,
         adata_whole.obsm['auxiliary'] = auxiliary_z.cpu().detach().numpy()
 
         # Periodic UMAP for visual inspection (downsampled if >50000 spots)
-        if epoch % plot_epoch == 0 and n_epochs_species - epoch >= plot_epoch:
+        if verbose and epoch % plot_epoch == 0 and n_epochs_species - epoch >= plot_epoch:
             if z.shape[0] >= 50000:
                 clustering_umap_downsampling(adata_species_dict, key_umap=key_added, downsampling_rate=0.1)
             else:
@@ -1535,7 +1648,7 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
             if species_order == 0:
                 model = STACAME.STACAME_minibatch_large(
                     hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(pretrain_device)
-                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
 
             # Neighbourhood sampler for mini‑batch training
             train_loader = NeighborSampler(data.edge_index,
@@ -1629,7 +1742,7 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
             if species_order == 0:
                 model = STACAME.STACAME(hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(
                     pretrain_device)
-                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
             species_order += 1
             print('Pretrain with STAGATE_multiple...')
             for epoch in tqdm(range(0, stagate_epoch_dict[species_id])):
@@ -1775,7 +1888,7 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
         hidden_dims=[auxiliary_X.shape[1], hidden_dims[0] // 2, hidden_dims[1]]).to(device)
 
     optimizer = torch.optim.Adam(list(model.parameters()) + list(auxiliary_model.parameters()), lr=lr_species,
-                                 weight_decay=weight_decay)
+                                 weight_decay=weight_decay, foreach=False)
 
     # Optionally add within‑species slice edges and triplets
     if if_integrate_within_species:
@@ -1815,11 +1928,11 @@ def train_STACAME_subgraph_auxiliary(adata_species_dict,
 
     # Discriminators for GAN domain confusion
     D_Z = STACAME.MultiClassDiscriminator(hidden_dims[1], len(adata_species_dict.keys())).to(device)
-    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001)
+    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001, foreach=False)
     D_Z.train()
 
     auxiliary_D_Z = STACAME.MultiClassDiscriminator(hidden_dims[1], len(adata_species_dict.keys())).to(device)
-    auxiliary_optimizer_D = torch.optim.Adam(list(auxiliary_D_Z.parameters()), lr=0.001, weight_decay=0.001)
+    auxiliary_optimizer_D = torch.optim.Adam(list(auxiliary_D_Z.parameters()), lr=0.001, weight_decay=0.001, foreach=False)
     auxiliary_D_Z.train()
 
     # Ground‑truth domain labels
@@ -2234,7 +2347,7 @@ def train_STACAME_subgraph(adata_species_dict,
 
         if species_order == 0:
             model = STACAME.STACAME_minibatch_large(hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(pretrain_device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
 
         # Minibatch
         train_loader = NeighborSampler(data.edge_index, node_idx=torch.LongTensor(np.array([i for i in range(adata.n_obs)])),
@@ -2344,7 +2457,7 @@ def train_STACAME_subgraph(adata_species_dict,
     merge_X = torch.FloatTensor(merge_X)
     ##-----------------------------------------------------------
     model = STACAME.STACAMEDecoder_minibatch(hidden_dims=[merge_X.shape[1], hidden_dims[0], hidden_dims[1]]).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr_species, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr_species, weight_decay=weight_decay, foreach=False)
     
     if if_integrate_within_species == True:
         anchor_ind_sections = triplet_ind_sections_dict['anchor_ind_sections']
@@ -2385,7 +2498,7 @@ def train_STACAME_subgraph(adata_species_dict,
     plot_epoch = n_epochs_species // 3
 
     D_Z = STACAME.MultiClassDiscriminator(hidden_dims[1], len(adata_species_dict.keys())).to(device)
-    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001)
+    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001, foreach=False)
     D_Z.train()
 
     species_list = []
@@ -2687,7 +2800,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
         if if_batch_pretrain:
             if species_order == 0:
                 model = STACAME.STACAME_minibatch_large(hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(pretrain_device)
-                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
             # Minibatch
             train_loader = NeighborSampler(data.edge_index, node_idx=torch.LongTensor(np.array([i for i in range(adata.n_obs)])),
                                    sizes=[8, 4], batch_size=batch_size_dict[species_id], shuffle=True, drop_last = True)
@@ -2781,7 +2894,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
             print('Pretrain with STAligner...')
             if species_order == 0:
                 model = STACAME.STACAME(hidden_dims=[data.x.shape[1], hidden_dims[0], hidden_dims[1]]).to(pretrain_device)
-                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, foreach=False)
             species_order += 1
             print('Pretrain with STAGATE_multiple...')
             for epoch in tqdm(range(0,  stagate_epoch_dict[species_id])):
@@ -2924,7 +3037,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
     merge_X = torch.FloatTensor(merge_X)
     ##-----------------------------------------------------------
     model = STACAME.STACAMEDecoder_minibatch(hidden_dims=[merge_X.shape[1], hidden_dims[0], hidden_dims[1]]).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr_species, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr_species, weight_decay=weight_decay, foreach=False)
     
     if if_integrate_within_species == True:
         anchor_ind_sections = triplet_ind_sections_dict['anchor_ind_sections']
@@ -2965,7 +3078,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
     plot_epoch = n_epochs_species // 3
 
     D_Z = STACAME.MultiClassDiscriminator(hidden_dims[1], len(adata_species_dict.keys())).to(device)
-    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001)
+    optimizer_D = torch.optim.Adam(list(D_Z.parameters()), lr=0.001, weight_decay=0.001, foreach=False)
     D_Z.train()
 
     species_list = []

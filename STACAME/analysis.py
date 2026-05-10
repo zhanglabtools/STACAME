@@ -8,30 +8,18 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.linalg
 from scipy.sparse import csr_matrix
-
 import pandas as pd
-
 import torch
-
 from .ST_utils import mclust_R
 from .typehint import RandomState
-
 from .utils import get_rs
-
 from .metrics import mean_average_precision, normalized_mutual_info, avg_silhouette_width, graph_connectivity, neighbor_conservation
-
 from sklearn.metrics import adjusted_rand_score as ari_score
 import colorcet as cc
-
 from collections import Counter
-
 import sklearn
-
 from matplotlib import rcParams
-
-
 import math
-
 
 
 def assign_color(adata_region, adata_cluster, region_palette, region_key, cluster_key, cluster_list):
@@ -134,11 +122,8 @@ def rotate_spots(spatial_mat, theta):
 
 
 def convert_dict2adata(adata_dict, key_umap='STACAME'):
-    #key_umap = 'STACAME'
     k = 0
     for species_id, adata in adata_dict.items():
-        #print(adata.obs_names)
-        #print(adata)
         if species_id == 'Zebrafish':
             adata.obs['annotation'] = adata.obs['layer_annotation']
         if k == 0:
@@ -419,12 +404,9 @@ def clustering_umap(adata_dict, key_umap='STACAME'):
 
 
 
-
-def clustering_umap_spatial(adata_dict, key_umap='STACAME'):
+def clustering_umap_spatial(adata_dict, key_umap='STAGATE'):
     k = 0
     for species_id, adata in adata_dict.items():
-        if species_id == 'Zebrafish':
-            adata.obs['annotation'] = adata.obs['layer_annotation']
         if k == 0:
             embedding_X = adata.obsm[key_umap]
             embedding_spatial = adata.obsm['spatial']
@@ -435,35 +417,28 @@ def clustering_umap_spatial(adata_dict, key_umap='STACAME'):
             embedding_annotation = list(adata.obs['annotation']) 
         else:
             embedding_X = np.concatenate((embedding_X, adata.obsm[key_umap]), axis=0)
-    
             embedding_spatial = np.concatenate((embedding_spatial, adata.obsm['spatial']), axis=0)
-    
             embedding_obs_name = embedding_obs_name + list(adata.obs_names)
             embedding_slice_name = embedding_slice_name + list(adata.obs['slice_name']) 
             embedding_batch_name = embedding_batch_name + list(adata.obs['batch_name'])
             embedding_species_id = embedding_species_id + list(adata.obs['species_id'])
             embedding_annotation = embedding_annotation + list(adata.obs['annotation'])
-            
+
         k += 1
-        # Visualize UMAP of each species
+        #Visualize UMAP of each species
         sc.pp.neighbors(adata,  n_neighbors=20, use_rep=key_umap, metric='cosine',  random_state=666)
         sc.tl.louvain(adata, random_state=666, key_added="louvain", resolution=0.5)
-        #sc.tl.leiden(adata_embedding, random_state=666, key_added="leiden", resolution=0.1)
         sc.tl.umap(adata, min_dist=1, random_state=666)
         plt.rcParams['font.sans-serif'] = "Arial"
         plt.rcParams["figure.figsize"] = (3, 3)
         plt.rcParams['font.size'] = 10
-
         num_clusters = len(adata.obs['annotation'].unique())
         mclust_R(adata, num_cluster=num_clusters, used_obsm=key_umap)
-
         print('mclust, ARI = %01.3f' % ari_score(adata.obs['annotation'], adata.obs['mclust']))
-        
         sc.pl.umap(adata, color=['batch_name', 'louvain', 'annotation', 'mclust'], ncols=3, wspace=0.7, show=True)
 
         adata_dict[species_id] = adata
-            
-    
+
     adata_embedding = ad.AnnData(X = embedding_X, obs=embedding_obs_name)
     adata_embedding.obsm['spatial'] = embedding_spatial
     adata_embedding.obs['slice_name'] = embedding_slice_name
@@ -471,44 +446,7 @@ def clustering_umap_spatial(adata_dict, key_umap='STACAME'):
     adata_embedding.obs['species_id'] = embedding_species_id
     adata_embedding.obs['annotation'] = embedding_annotation
     
-    sc.pp.neighbors(adata_embedding,  n_neighbors=20, use_rep='X', metric='cosine',  random_state=666)
-    sc.tl.louvain(adata_embedding, random_state=666, key_added="louvain", resolution=0.5)
-    #sc.tl.leiden(adata_embedding, random_state=666, key_added="leiden", resolution=0.1)
-    
-    print(adata_embedding.X.shape)
-
-    sc.tl.umap(adata_embedding, min_dist=1, random_state=666)
-
-    species_ids = list(adata_dict.keys())
-    
-    species_color = ['#4778FA', '#8A1C62', '#ED7A43'] #['#ff7f0e', '#1f77b4']
-    species_color_dict = dict(zip(species_ids, species_color))
-    adata_embedding.uns['species_colors'] = [species_color_dict[x] for x in adata_embedding.obs.species_id]
-    
-    
-    plt.rcParams['font.sans-serif'] = "Arial"
-    plt.rcParams["figure.figsize"] = (3, 3)
-    plt.rcParams['font.size'] = 10
-
-    # mclust clustering
-    num_clusters = len(adata_embedding.obs['annotation'].unique())
-    adata_embedding.obsm[key_umap] = adata_embedding.X
-    mclust_R(adata_embedding, num_cluster=num_clusters, used_obsm=key_umap)
-
-    print('mclust, ARI = %01.3f' % ari_score(adata_embedding.obs['annotation'], adata_embedding.obs['mclust']))
-
-    sc.pl.umap(adata_embedding, color=['species_id', 'batch_name', 'louvain', 'annotation', 'mclust'], ncols=2, wspace=0.5, show=True)
-
-    fig, axes = plt.subplots(len(species_ids), 1,  figsize=(3, 3*len(species_ids))) #, dpi=500
-    for i in range(len(species_ids)):
-        species_id = species_ids[i]
-        adata_mh = adata_embedding[adata_embedding.obs['species_id'].isin([species_id])].copy()
-        color_list = sns.color_palette(cc.glasbey, n_colors=len(adata_mh.obs['annotation'].unique()))
-        palette = {k:v for k,v in zip(adata_mh.obs['annotation'].unique(), color_list)}
-        ax = sc.pl.umap(adata_embedding, show=False, ax=axes[i])
-        sc.pl.umap(adata_mh, color='annotation', ax=ax,  wspace=0.5, show=False, size=10, palette=palette, legend_loc='on data')     #legend_fontweight='normal',
-    plt.show()
-    return adata_dict
+    return adata_dict, adata_embedding
 
 
 def spatial_annotation_species(adata_dict, img_key=None, scale_factor=None, spot_size=1, title_size=12):

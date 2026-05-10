@@ -9,17 +9,9 @@ scanorama==1.7.4
 scvi-tools==1.4.1
 
 # Deep learning & probabilistic modeling
-#torch==2.7.1
 torchmetrics==1.8.2
 lightning==2.6.0
 gpytorch==1.14
-
-# PyTorch Geometric for graph learning
-#torch-geometric==2.6.1
-#torch-cluster==1.6.3+pt27cu126
-#torch-scatter==2.1.2+pt27cu126
-#torch-sparse==0.6.18+pt27cu126
-#torch-spline-conv==1.2.2+pt27cu126
 
 # Advanced interactive visualization
 plotly==6.1.2
@@ -49,11 +41,6 @@ umap-learn==0.5.7
 mudata==0.3.2
 
 # Bioinformatics & multi-omics
-#rpy2==3.5.11
-#bedtools==2.31.1
-#r-mclust==6.1.1
-#pysam==0.23.3
-#pybedtools==0.12.0
 gseapy==1.1.10
 
 # Graph & spatial analysis
