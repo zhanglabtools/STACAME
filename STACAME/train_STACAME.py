@@ -2305,8 +2305,7 @@ def train_STACAME_subgraph(adata_species_dict,
                   batch_size_dict = {'Mouse': 20000, 'Marmoset':12000, 'Macaque':4096}, 
                   batch_size = 2048, 
                   umap_downsampling_rate = 0.1, 
-                  mode = 'spatial_domain', 
-                  annotation_species = ['Mouse']):
+                  mode = 'spatial_domain', concate_pca_dim = None):
     """\
     Train graph attention auto-encoder and use spot triplets across species to perform batch correction in the embedding space.
 
@@ -2682,7 +2681,6 @@ def train_STACAME_subgraph(adata_species_dict,
                 
             loss_G_GAN = -F.cross_entropy(D_Z(z_batch) , true_dom[idx_subset_list, ].to(device))
             mmd_loss_sum = mmd_loss(z_A[0:mmd_batch_size], z_B[0:mmd_batch_size]).to(device)
-            #loss_G_GAN = -(torch.log(1 + torch.exp(-D_Z(z_A))) + torch.log(1 + torch.exp(D_Z(z_B)))).mean()
             if if_integrate_within_species == True:     
                 loss =  mse_beta * mse_loss + tri_beta * tri_output_species + beta * tri_output  + mmd_beta * mmd_loss_sum +  gan_beta * loss_G_GAN 
             else:
@@ -2893,10 +2891,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
                     optimizer.zero_grad()
                     z_batch, out_batch = model(data.x[n_id, :].to(pretrain_device), adjs, mode='batch')
                     # get batch data
-                    x_batch = data.x[n_id,:].to(pretrain_device)
-                    #if epoch % 2 == 0:
-                        #n_id_batch = n_id[0:batchsize]
-                        
+                    x_batch = data.x[n_id,:].to(pretrain_device)                        
                     n_id_list = n_id.cpu().detach().numpy()
                     batch_id_list = adata.obs['batch_name'][n_id_list]
                     x_batch_cpu = z_batch.cpu().detach().numpy()
@@ -2955,7 +2950,6 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
                     z_list.append(z[:batch.batch_size].cpu())
                     out_list.append(out[:batch.batch_size].cpu())
             
-            # z, _ = model(data.x, data.edge_index)
             z_all = torch.cat(z_list, dim=0)
             out_all = torch.cat(out_list, dim=0)
             adata_species_dict[species_id].obsm['STAGATE'] = z_all.cpu().detach().numpy()
@@ -2981,11 +2975,7 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
                 z, out = model(data.x.to(pretrain_device), data.edge_index.to(pretrain_device))
 
                 if epoch % 10 == 0 and epoch >= stagate_epoch_dict[species_id]//2:
-                    # if verbose:
-                    #     print('Update spot triplets at epoch ' + str(epoch))
                     adata.obsm['STAGATE'] = z.cpu().detach().numpy()
-                    # If knn_neigh>1, points in one slice may have multiple MNN points in another slice.
-                    # not all points have MNN achors
                     mnn_dict = create_dictionary_mnn(adata, use_rep='STAGATE', batch_name='batch_name', k=knn_neigh,
                                                                iter_comb=iter_comb, verbose=0)
                     anchor_ind = []
@@ -3167,7 +3157,6 @@ def train_STACAME_subgraph_GAN(adata_species_dict,
             prune_edge_index=torch.LongTensor(np.array([])), x=z)
         data = data.to(device)
 
-    #print('adata_species_dict.keys()', adata_species_dict.keys())
     for spe, adata in adata_species_dict.items():
         print(spe, adata.n_obs)
 

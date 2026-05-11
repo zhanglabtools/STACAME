@@ -5,35 +5,9 @@ cudnn.benchmark = True
 import torch.nn.functional as F
 from .gat_conv import GATConv
 from typing import List, Optional, Union
-
 import torch
 from torch import nn
 import random
-
-
-class DomainSpecificBatchNorm1d(nn.Module):
-    def __init__(self, num_features, num_domains=2):
-        super().__init__()
-        self.num_domains = num_domains
-        self.bn_layers = nn.ModuleList([
-            nn.BatchNorm1d(num_features) for _ in range(num_domains)
-        ])
-
-    def forward(self, x, domain_id):
-        # x: [B, C], domain_id: scalar or tensor of domain indices
-        if isinstance(domain_id, int):
-            return self.bn_layers[domain_id](x)
-        elif isinstance(domain_id, torch.Tensor):
-            # e.g., domain_id = tensor of shape [B]
-            out = torch.zeros_like(x)
-            for d in range(self.num_domains):
-                idx = (domain_id == d).nonzero(as_tuple=True)[0]
-                if idx.numel() > 0:
-                    out[idx] = self.bn_layers[d](x[idx])
-            return out
-        else:
-            raise ValueError("Unsupported domain_id format.")
-
 
 
 
