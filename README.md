@@ -60,10 +60,6 @@ pip install rpy2
 python -m ipykernel install --user --name stacame --display-name "stacame" 
 ```
 
-if there is an error of rpy2, make sure that rpy2 is the right version:
-```
-conda install -c conda-forge rpy2==3.6.7
-```
 
 Install STACAME.
 ```
